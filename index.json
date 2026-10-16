@@ -2,5 +2,34 @@
   "format": 1,
   "name": "LisaExists' Revenge Next Plugins",
   "description": "Personal Revenge Next plugin repository featuring Hidden Channels (Next).",
-  "plugins": {}
+  "plugins": {
+    "de.lisaexists.hidden-channels-next": {
+      "name": "Hidden Channels (Next)",
+      "description": "Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
+      "author": "Lioncat6 <917903273514663957>",
+      "contributors": [
+        "cloudburst <892128204150685769>",
+        "Training Dummy <601137505739472908>",
+        "LisaExists <836161010053283890>"
+      ],
+      "channels": {
+        "latest": "1.1.0"
+      },
+      "versions": {
+        "1.1.0": {
+          "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.hidden-channels-next@1.1.0.zip",
+          "sha256": "2ef1f8d16c8be50e7271c6efc9243dafd21ac5b2f9638a95011b3a3ddbeae6fa",
+          "size": 4495,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=350.4"
+            }
+          }
+        }
+      }
+    }
+  }
 }
