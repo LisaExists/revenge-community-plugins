@@ -1,6 +1,0 @@
-{
-	"name": "@revenge-mod/themes-settings",
-	"devDependencies": {
-		"@revenge-mod/themes-api": "workspace:*"
-	}
-}
