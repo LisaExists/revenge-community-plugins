@@ -3,6 +3,33 @@
   "name": "LisaExists' Revenge Next Plugins",
   "description": "Personal Revenge Next plugin repository featuring Hidden Channels (Next).",
   "plugins": {
+    "de.lisaexists.decor-next": {
+      "name": "Decor (Next)",
+      "description": "Choose, create, and use custom avatar decorations from Decor.",
+      "author": "LisaExists <836161010053283890>",
+      "contributors": [
+        "Fiery <890228870559698955>",
+        "Bwlok <501827585806827520>"
+      ],
+      "channels": {
+        "latest": "1.0.6"
+      },
+      "versions": {
+        "1.0.6": {
+          "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.decor-next@1.0.6.zip",
+          "sha256": "9d5b19bc8ae3547993211d058d87cd299614376ecfae0ed48dd4c537570a63ec",
+          "size": 12920,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.0"
+            }
+          }
+        }
+      }
+    },
     "de.lisaexists.hidden-channels-next": {
       "name": "Hidden Channels (Next)",
       "description": "Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
