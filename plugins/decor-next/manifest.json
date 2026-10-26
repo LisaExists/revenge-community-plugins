@@ -1,0 +1,23 @@
+{
+	"format": 1,
+	"id": "de.lisaexists.decor-next",
+	"name": "Decor (Next)",
+	"description": "Choose, create, and use custom avatar decorations from Decor.",
+	"author": "LisaExists <836161010053283890>",
+	"contributors": [
+		"Fiery <890228870559698955>",
+		"Bwlok <501827585806827520>"
+	],
+	"version": "1.0.6",
+	"dependencies": {
+		"revenge.api": {
+			"version": ">=1 <2"
+		},
+		"discord": {
+			"version": ">=352.0"
+		}
+	},
+	"dist": {
+		"script": "index.js"
+	}
+}
