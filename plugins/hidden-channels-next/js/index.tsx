@@ -7,7 +7,7 @@
  * https://github.com/revenge-mod/revenge-plugin-template
  */
 
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Image, Pressable, StyleSheet, Text as NativeText, useColorScheme, View } from 'react-native'
 import { getAssetIdByName } from '@revenge-mod/assets'
 import { AlertActionCreators, ToastActionCreators } from '@revenge-mod/discord/actions'
 import { getStore } from '@revenge-mod/discord/flux'
@@ -21,6 +21,7 @@ import { afterJSX } from '@revenge-mod/react/jsx-runtime'
 interface HiddenChannelsSettings {
   showIcon: boolean
   showPopup: boolean
+  showStartupWarningPopup: boolean
 }
 
 type AnyRecord = Record<string, any>
@@ -32,8 +33,105 @@ type ChannelRecord = AnyRecord & {
   lastPinTimestamp?: number | string | null
 }
 
-const ALERT_KEY = 'com.lioncat6.hidden-channels-next.confirm'
-const TOAST_KEY = 'com.lioncat6.hidden-channels-next.date'
+const ALERT_KEY = 'de.lisaexists.hidden-channels-next.confirm'
+const TOAST_KEY = 'de.lisaexists.hidden-channels-next.date'
+const STARTUP_WARNING_ALERT_KEY = 'de.lisaexists.hidden-channels-next.server-warning'
+const STARTUP_WARNING_TOAST_KEY = 'de.lisaexists.hidden-channels-next.server-warning-toast'
+
+
+const DEVELOPER_USER_IDS = new Set<string>(['836161010053283890'])
+
+function getCurrentDiscordUserId(): string | undefined {
+  try {
+    for (const [moduleExports] of lookupModules(withProps('getCurrentUser'))) {
+      for (const target of [moduleExports, moduleExports?.default]) {
+        if (!target || typeof target.getCurrentUser !== 'function') continue
+        try {
+          const id = target.getCurrentUser()?.id
+          if (typeof id === 'string' && id.length > 0) return id
+        } catch {
+          // A candidate module may not be the active user store; try the next one.
+        }
+      }
+    }
+  } catch {
+    // Fail closed: if the current user cannot be resolved, do not show developer settings.
+  }
+  return undefined
+}
+
+function isDeveloperUser(): boolean {
+  const userId = getCurrentDiscordUserId()
+  return userId !== undefined && DEVELOPER_USER_IDS.has(userId)
+}
+
+/**
+ * Resolve Discord's active theme when possible, since a user can choose a
+ * Discord theme that differs from the device theme. Fall back to React Native's
+ * color scheme if the internal theme store is not available in this Discord build.
+ */
+function getDiscordThemeIsLight(): boolean | undefined {
+  const isLightTheme = (value: unknown): boolean | undefined => {
+    if (typeof value !== 'string') return undefined
+    const theme = value.toLowerCase()
+    if (theme === 'light') return true
+    if (['dark', 'darker', 'midnight', 'ash', 'onyx'].includes(theme)) return false
+    return undefined
+  }
+
+  try {
+    for (const [moduleExports] of lookupModules(withProps('theme'))) {
+      for (const target of [moduleExports, moduleExports?.default]) {
+        if (!target) continue
+
+        // Prefer the directly exposed ThemeStore.theme, but also support builds
+        // that expose the active theme only through the store state.
+        try {
+          const directTheme = isLightTheme(target.theme)
+          if (directTheme !== undefined) return directTheme
+        } catch {
+          // A getter on an unrelated module can throw; continue searching.
+        }
+
+        try {
+          if (typeof target.getState === 'function') {
+            const stateTheme = isLightTheme(target.getState()?.theme)
+            if (stateTheme !== undefined) return stateTheme
+          }
+        } catch {
+          // Keep looking for the actual theme store.
+        }
+      }
+    }
+  } catch {
+    // Internal theme discovery is best-effort; use the system appearance below.
+  }
+
+  return undefined
+}
+
+/** Apply readable text colors to every custom React Native Text in this plugin. */
+function ThemedText(props: { children?: any; style?: any; [key: string]: any }) {
+  const systemColorScheme = useColorScheme()
+  const isLight = getDiscordThemeIsLight() ?? systemColorScheme === 'light'
+  return (
+    <NativeText
+      {...props}
+      style={[{ color: isLight ? '#23272A' : '#F2F3F5' }, props.style]}
+    />
+  )
+}
+
+// Keep the existing JSX unchanged while making all plugin-owned Text theme-aware.
+const Text = ThemedText
+
+// November 6 is the reported date, not one I could confirm in Discord's public
+// documentation. Discord's developer docs currently list November 16, 2026 for
+// mandatory channel obfuscation for bots. Keep the uncertainty explicit.
+const SERVER_SIDE_CHANGE_WARNING =
+  'Discord will stop sending hidden channel names and metadata starting November 16, 2026. Once Discord stops sending real hidden-channel names or metadata to your client, this plugin cannot recover that missing data.'
+const SERVER_SIDE_CHANGE_NOTIFICATION =
+  'Hidden Channels warning: Discord server-side changes on November 16, 2026 will break this plugin. See the plugin settings for details.'
 
 const styles = StyleSheet.create({
   details: {
@@ -51,6 +149,17 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     marginRight: 4,
+  },
+  warningContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  warningHeading: {
+    fontWeight: '700',
+  },
+  warningText: {
+    lineHeight: 20,
   },
 })
 
@@ -246,10 +355,40 @@ export default plugin<{ jsonStorage: HiddenChannelsSettings }>({
     default: {
       showIcon: true,
       showPopup: true,
+      showStartupWarningPopup: true,
     },
   },
 
   start({ cleanup, jsonStorage, logger }) {
+    // Show the compatibility warning every time the plugin starts. The toast and
+    // modal are independently guarded so one failing API does not suppress the other.
+    try {
+      ToastActionCreators.open({
+        key: STARTUP_WARNING_TOAST_KEY,
+        content: SERVER_SIDE_CHANGE_NOTIFICATION,
+      })
+    } catch (error) {
+      logger.warn(`[Hidden Channels] Could not display the startup warning notification: ${String(error)}`)
+    }
+
+    // Only the allowlisted developer can change this preference through the UI.
+    // The toast above intentionally remains enabled even when the dialog is disabled.
+    const startupSettings = jsonStorage.cache as HiddenChannelsSettings | undefined
+    if (startupSettings?.showStartupWarningPopup ?? true) {
+      try {
+        AlertActionCreators.openAlert(
+          STARTUP_WARNING_ALERT_KEY,
+          <Design.AlertModal
+            title="Hidden Channels compatibility warning"
+            content={<Text>{SERVER_SIDE_CHANGE_WARNING}</Text>}
+            actions={<Design.AlertActionButton text="Understood" />}
+          />,
+        )
+      } catch (error) {
+        logger.warn(`[Hidden Channels] Could not display the startup warning dialog: ${String(error)}`)
+      }
+    }
+
     // Read settings dynamically: jsonStorage.set() updates its cache while the
     // plugin remains active, just as the Classic storage proxy did.
     const getSettings = (): HiddenChannelsSettings => {
@@ -257,6 +396,7 @@ export default plugin<{ jsonStorage: HiddenChannelsSettings }>({
       return {
         showIcon: current?.showIcon ?? true,
         showPopup: current?.showPopup ?? true,
+        showStartupWarningPopup: current?.showStartupWarningPopup ?? true,
       }
     }
 
@@ -589,20 +729,40 @@ export default plugin<{ jsonStorage: HiddenChannelsSettings }>({
     const settings = api.jsonStorage.use()
 
     return (
-      <Design.TableRowGroup title="Options">
-        <Design.TableSwitchRow
-          label="Show Lock Icon"
-          subLabel="Show a lock icon beside hidden channel names."
-          value={settings?.showIcon ?? true}
-          onValueChange={(showIcon: boolean) => api.jsonStorage.set({ showIcon })}
-        />
-        <Design.TableSwitchRow
-          label="Show Popup on Hidden Channels"
-          subLabel="Ask before opening a channel marked as hidden."
-          value={settings?.showPopup ?? true}
-          onValueChange={(showPopup: boolean) => api.jsonStorage.set({ showPopup })}
-        />
-      </Design.TableRowGroup>
+      <>
+        <Design.TableRowGroup title="Options">
+          <Design.TableSwitchRow
+            label="Show Lock Icon"
+            subLabel="Show a lock icon beside hidden channel names."
+            value={settings?.showIcon ?? true}
+            onValueChange={(showIcon: boolean) => api.jsonStorage.set({ showIcon })}
+          />
+          <Design.TableSwitchRow
+            label="Show Popup on Hidden Channels"
+            subLabel="Ask before opening a channel marked as hidden."
+            value={settings?.showPopup ?? true}
+            onValueChange={(showPopup: boolean) => api.jsonStorage.set({ showPopup })}
+          />
+        </Design.TableRowGroup>
+        <Design.TableRowGroup title="Compatibility Warning">
+          <View style={styles.warningContainer}>
+            <Text style={styles.warningHeading}>Upcoming server-side compatibility risk</Text>
+            <Text style={styles.warningText}>{SERVER_SIDE_CHANGE_WARNING}</Text>
+          </View>
+        </Design.TableRowGroup>
+        {isDeveloperUser() ? (
+          <Design.TableRowGroup title="Developer">
+            <Design.TableSwitchRow
+              label="Show Startup Warning Popup"
+              subLabel="Disable the startup warning dialog on this device. The warning notification will still appear."
+              value={settings?.showStartupWarningPopup ?? true}
+              onValueChange={(showStartupWarningPopup: boolean) =>
+                api.jsonStorage.set({ showStartupWarningPopup })
+              }
+            />
+          </Design.TableRowGroup>
+        ) : null}
+      </>
     )
   },
 })

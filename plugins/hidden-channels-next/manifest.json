@@ -2,14 +2,14 @@
   "format": 1,
   "id": "de.lisaexists.hidden-channels-next",
   "name": "Hidden Channels (Next)",
-  "description": "Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
+  "description": "[WILL STOP WORKING AFTER NOVEMBER 6TH DUE TO DISCORD PATCHING IT SERVER-SIDED] Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
   "author": "LisaExists <836161010053283890>",
   "contributors": [
     "cloudburst <892128204150685769>",
     "Training Dummy <601137505739472908>",
     "Lioncat6 <917903273514663957>"
   ],
-  "version": "1.1.1",
+  "version": "1.1.2",
   "dependencies": {
     "revenge.api": {
       "version": ">=1 <2"
