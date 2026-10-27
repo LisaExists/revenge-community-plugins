@@ -356,7 +356,7 @@ export function installDiscordIntegration(
 		),
 	)
 
-	const onConnection = () => {
+	const onConnection = (payload: AnyRecord): AnyRecord => {
 		clearUserDecorations()
 		const id = currentAccountId()
 		resetCurrentUser(id)
@@ -368,11 +368,18 @@ export function installDiscordIntegration(
 		if (id && getAuthSnapshot().token)
 			void refreshCurrentUser().catch(() => undefined)
 		if (id) queueUserDecorations([id])
+		// Returning the original payload is required: Revenge Next cancels a Flux event
+		// when an onFluxEventDispatched patch returns void/falsy.
+		return payload
 	}
 	cleanup(onFluxEventDispatched('CONNECTION_OPEN', onConnection))
 	cleanup(
-		onFluxEventDispatched('USER_SETTINGS_ACCOUNT_SUBMIT_SUCCESS', () =>
-			syncAccount(true),
+		onFluxEventDispatched(
+			'USER_SETTINGS_ACCOUNT_SUBMIT_SUCCESS',
+			(payload: AnyRecord) => {
+				syncAccount(true)
+				return payload
+			},
 		),
 	)
 	cleanup(
@@ -381,22 +388,26 @@ export function installDiscordIntegration(
 				? payload.messages.map((message: any) => message?.author?.id)
 				: []
 			queueUserDecorations(ids)
+			return payload
 		}),
 	)
 	cleanup(
 		onFluxEventDispatched('MESSAGE_CREATE', (payload: AnyRecord) => {
 			const id = payload.message?.author?.id
 			if (id) queueUserDecorations([id])
+			return payload
 		}),
 	)
 	cleanup(
 		onFluxEventDispatched('TYPING_START', (payload: AnyRecord) => {
 			if (payload.userId) queueUserDecorations([payload.userId])
+			return payload
 		}),
 	)
 	cleanup(
 		onFluxEventDispatched('USER_PROFILE_MODAL_OPEN', (payload: AnyRecord) => {
 			if (payload.userId) queueUserDecorations([payload.userId])
+			return payload
 		}),
 	)
 

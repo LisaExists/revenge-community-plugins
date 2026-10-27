@@ -8,4 +8,4 @@ export const DECOR_SKU_ID = '100101099111114'
 export const RAW_SKU_ID = '11497119'
 export const SOURCE_URL =
 	'https://github.com/bwlok/revenge-plugins/tree/master/plugins/Decor'
-export const PLUGIN_VERSION = '1.0.6'
+export const PLUGIN_VERSION = '1.0.7'

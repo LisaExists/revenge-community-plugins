@@ -14,13 +14,10 @@ import {
 	Pressable,
 	ScrollView,
 	StyleSheet,
-	TextInput,
 	View,
 } from 'react-native'
 import { errorMessage } from '../api'
 import {
-	AUTHORIZE_URL,
-	CLIENT_ID,
 	DECOR_SKU_ID,
 	PLUGIN_VERSION,
 	SOURCE_URL,
@@ -55,15 +52,6 @@ const styles = StyleSheet.create({
 	buttons: { flexDirection: 'row', gap: 8 },
 	center: { alignItems: 'center', padding: 16, gap: 8 },
 	footer: { alignItems: 'center', paddingVertical: 18, gap: 4 },
-	callbackInput: {
-		minHeight: 92,
-		borderWidth: 1,
-		borderColor: 'rgba(127, 127, 127, 0.55)',
-		borderRadius: 8,
-		paddingHorizontal: 12,
-		paddingVertical: 10,
-		textAlignVertical: 'top',
-	},
 })
 
 function toast(
@@ -148,9 +136,6 @@ export default function DecorSettings() {
 	const [page, setPage] = useState<'main' | 'presets' | 'create'>('main')
 	const [routeAccountId, setRouteAccountId] = useState<string | null>(null)
 	const [authBusy, setAuthBusy] = useState(false)
-	const [manualOAuth, setManualOAuth] = useState(false)
-	const [callbackUrl, setCallbackUrl] = useState('')
-	const [manualAuthBusy, setManualAuthBusy] = useState(false)
 	const [actionBusy, setActionBusy] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const authorized = !!auth.token && !!auth.accountId
@@ -186,57 +171,10 @@ export default function DecorSettings() {
 			await authorizeWithDecor(auth.accountId)
 			toast('Authorized with Decor.', 'success')
 		} catch (reason) {
-			if (
-				reason instanceof Error &&
-				reason.name === 'ManualOAuthRequiredError'
-			) {
-				setManualOAuth(true)
-				setError(null)
-			} else {
-				const message = errorMessage(reason)
-				if (message !== 'Authorization was cancelled.') setError(message)
-			}
+			const message = errorMessage(reason)
+			if (message !== 'Authorization was cancelled.') setError(message)
 		} finally {
 			setAuthBusy(false)
-		}
-	}
-
-	const launchBrowserAuthorization = async () => {
-		if (!auth.accountId) {
-			setError('Wait for Discord to finish connecting.')
-			return
-		}
-		const url = new URL('https://discord.com/oauth2/authorize')
-		url.searchParams.set('client_id', CLIENT_ID)
-		url.searchParams.set('redirect_uri', AUTHORIZE_URL)
-		url.searchParams.set('response_type', 'code')
-		url.searchParams.set('scope', 'identify')
-		try {
-			await Linking.openURL(url.toString())
-		} catch {
-			setError(
-				'Could not open the browser. Check that a browser is installed and try again.',
-			)
-		}
-	}
-
-	const completeBrowserAuthorization = async () => {
-		if (!auth.accountId) {
-			setError('Wait for Discord to finish connecting.')
-			return
-		}
-		setManualAuthBusy(true)
-		setError(null)
-		try {
-			const { exchangeDecorCallback } = await import('../utils/authorization')
-			await exchangeDecorCallback(callbackUrl, auth.accountId)
-			setManualOAuth(false)
-			setCallbackUrl('')
-			toast('Authorized with Decor.', 'success')
-		} catch (reason) {
-			setError(errorMessage(reason))
-		} finally {
-			setManualAuthBusy(false)
 		}
 	}
 
@@ -386,51 +324,15 @@ export default function DecorSettings() {
 							decorations. Tokens are stored separately for each Discord
 							account.
 						</Design.Text>
-						{!manualOAuth ? (
-							<Design.Button
-								text={
-									authBusy ? 'Waiting for authorization…' : 'Authorize with Decor'
-								}
-								variant="primary"
-								loading={authBusy}
-								disabled={authBusy || !auth.accountId}
-								onPress={() => void authorize()}
-							/>
-						) : (
-							<>
-								<Design.Text>
-									This Discord build does not provide an in-app OAuth screen. Open Discord authorization in your browser and sign into the same Discord account used in this app. After Discord redirects, copy the URL beginning with https://decor.fieryflames.dev/api/authorize and containing ?code= from the browser address bar, then paste it below. Decor (Next) exchanges the temporary code inside the app; you do not need to copy or save an access token.
-								</Design.Text>
-								<Design.Button
-									text="Open Discord authorization"
-									variant="primary"
-									disabled={!auth.accountId || manualAuthBusy}
-									onPress={() => void launchBrowserAuthorization()}
-								/>
-								<TextInput
-									accessibilityLabel="Decor authorization callback URL"
-									value={callbackUrl}
-									onChangeText={setCallbackUrl}
-									placeholder="https://decor.fieryflames.dev/api/authorize?code=…"
-									keyboardType="url"
-									autoCapitalize="none"
-									autoCorrect={false}
-									multiline
-									style={styles.callbackInput}
-								/>
-								<Design.Button
-									text={
-						manualAuthBusy ? 'Completing authorization…' : 'Complete authorization'
-					}
-									variant="secondary"
-									loading={manualAuthBusy}
-									disabled={
-						manualAuthBusy || !callbackUrl.trim() || !auth.accountId
-					}
-									onPress={() => void completeBrowserAuthorization()}
-								/>
-							</>
-						)}
+						<Design.Button
+							text={
+								authBusy ? 'Waiting for authorization…' : 'Authorize with Decor'
+							}
+							variant="primary"
+							loading={authBusy}
+							disabled={authBusy || !auth.accountId}
+							onPress={() => void authorize()}
+						/>
 					</>
 				) : (
 					<>

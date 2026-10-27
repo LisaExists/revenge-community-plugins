@@ -8,7 +8,7 @@
 		"Fiery <890228870559698955>",
 		"Bwlok <501827585806827520>"
 	],
-	"version": "1.0.6",
+	"version": "1.0.7",
 	"dependencies": {
 		"revenge.api": {
 			"version": ">=1 <2"

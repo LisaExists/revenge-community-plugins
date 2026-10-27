@@ -1,128 +1,35 @@
 /* Decor Classic attribution: Fiery and Bwlok. Revenge Next port: LisaExists. GPL-3.0. */
 
-import { lookupModules } from '@revenge-mod/modules/finders'
+import { AlertActionCreators } from '@revenge-mod/discord/actions'
+import { Design } from '@revenge-mod/discord/design'
+import { lookupModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
+import { lookupModule, lookupModules } from '@revenge-mod/modules/finders'
 import { withName, withProps } from '@revenge-mod/modules/finders/filters'
-import { ReactNative } from '@revenge-mod/react'
 import { AUTHORIZE_URL, CLIENT_ID } from '../constants'
 import { getAuthSnapshot, setTokenForCurrentAccount } from '../stores/auth'
 
 type RecordLike = Record<string, any>
-type CloseOptions = { onCloseCallback?: () => void }
-type OpenModal = (
-	render: (props: RecordLike) => unknown,
-	options?: CloseOptions,
-) => unknown
+type OAuthLocation = { location: string }
+type ModalManager = {
+	pushModal: (options: RecordLike) => unknown
+	popModal: (key: string) => unknown
+}
 
+const OAUTH_MODAL_KEY = 'oauth2-authorize'
 let cancelPending: (() => void) | undefined
-
-/** Raised when this Discord build has no in-app OAuth UI. Settings can then
- * offer the system-browser callback flow rather than failing authorization. */
-export class ManualOAuthRequiredError extends Error {
-	constructor() {
-		super('This Discord build requires browser-based Decor authorization.')
-		this.name = 'ManualOAuthRequiredError'
-	}
-}
-
-/** Exchange a copied Decor callback URL for a token without exposing the token
- * in the browser or asking the user to paste a long-lived credential. */
-export async function exchangeDecorCallback(
-	location: string,
-	expectedAccountId: string,
-	parentSignal?: AbortSignal,
-): Promise<void> {
-	if (getAuthSnapshot().accountId !== expectedAccountId)
-		throw new Error(
-			'The active Discord account changed. Reopen Decor and try again.',
-		)
-
-	let callback: URL
-	try {
-		callback = new URL(location.trim())
-	} catch {
-		throw new Error('Paste the full URL from the Decor authorization redirect.')
-	}
-	const expected = new URL(AUTHORIZE_URL)
-	if (
-		callback.protocol !== 'https:' ||
-		callback.origin !== expected.origin ||
-		callback.pathname !== expected.pathname
-	)
-		throw new Error(
-			'The URL must be the final HTTPS redirect to decor.fieryflames.dev/api/authorize.',
-		)
-
-	const oauthError = callback.searchParams.get('error')
-	if (oauthError === 'access_denied')
-		throw new Error('Discord authorization was denied.')
-	if (oauthError)
-		throw new Error('Discord reported an authorization error. Please retry.')
-	if (!callback.searchParams.get('code'))
-		throw new Error(
-			'The pasted URL has no authorization code. Finish Discord authorization and copy the final redirect URL.',
-		)
-
-	callback.searchParams.set('client', 'revenge')
-	const controller = new AbortController()
-	const abortFromParent = () => controller.abort()
-	if (parentSignal?.aborted) controller.abort()
-	else parentSignal?.addEventListener('abort', abortFromParent, { once: true })
-	const timeout = setTimeout(() => controller.abort(), 20_000)
-	try {
-		let response: Response
-		try {
-			response = await fetch(callback.toString(), {
-				method: 'GET',
-				signal: controller.signal,
-			})
-		} catch {
-			if (controller.signal.aborted)
-				throw new Error(
-					'Decor authorization timed out. Check your connection and retry.',
-				)
-			throw new Error(
-				'Decor authorization could not reach its callback endpoint.',
-			)
-		}
-		if (!response.ok)
-			throw new Error(`Decor authorization failed (HTTP ${response.status}).`)
-		const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-		if (contentType.includes('text/html'))
-			throw new Error(
-				'Decor returned a web page instead of an authorization token. Please retry.',
-			)
-		let responseText: string
-		try {
-			responseText = await response.text()
-		} catch {
-			if (controller.signal.aborted)
-				throw new Error(
-					'Decor authorization timed out. Check your connection and retry.',
-				)
-			throw new Error('Decor returned an unreadable authorization response.')
-		}
-		const token = responseText.trim()
-		if (
-			!token ||
-			token.length > 4096 ||
-			/^<!doctype\s+html|^<html\b/i.test(token)
-		)
-			throw new Error('Decor returned an invalid authorization response.')
-		if (getAuthSnapshot().accountId !== expectedAccountId)
-			throw new Error(
-				'The active Discord account changed. Reopen Decor and try again.',
-			)
-		setTokenForCurrentAccount(token, expectedAccountId)
-	} finally {
-		clearTimeout(timeout)
-		parentSignal?.removeEventListener('abort', abortFromParent)
-	}
-}
 
 function namespaceOf(value: unknown): RecordLike | undefined {
 	if (value && (typeof value === 'object' || typeof value === 'function'))
 		return value as RecordLike
 	return undefined
+}
+
+function namespacesOf(value: unknown): RecordLike[] {
+	const namespace = namespaceOf(value)
+	const defaultNamespace = namespaceOf(namespace?.default)
+	return [namespace, defaultNamespace].filter(
+		(value): value is RecordLike => !!value,
+	)
 }
 
 function isReactComponent(value: unknown): boolean {
@@ -153,143 +60,388 @@ function hasExportName(value: unknown, name: string, depth = 0): boolean {
 }
 
 /**
- * Prefer an exact named export, then try the component's runtime name. Search
- * every match instead of assuming the first module returned by a finder is the
- * component; Discord commonly has several unrelated exports with similar names.
- * `initialize: false` avoids initializing unrelated, not-yet-loaded Discord
- * modules simply because a settings screen was opened.
+ * Find every plausible export rather than trusting a first match. Revenge's
+ * finders return module namespaces, while older Discord modules may expose the
+ * component either as a named export or beneath `default`.
  */
 function findComponentExport(name: string): unknown {
-	try {
-		for (const [moduleExports] of lookupModules(withProps(name), {
-			returnNamespace: true,
-			initialize: false,
-		})) {
-			const namespace = namespaceOf(moduleExports)
-			const defaultNamespace = namespaceOf(namespace?.default)
-			for (const candidate of [
-				namespace?.[name],
-				defaultNamespace?.[name],
-			]) {
-				if (isReactComponent(candidate)) return candidate
+	const options = { returnNamespace: true } as const
+	for (const filter of [withProps(name), withName(name)]) {
+		try {
+			for (const [moduleExports] of lookupModules(filter, options)) {
+				for (const namespace of namespacesOf(moduleExports)) {
+					const named = namespace[name]
+					if (isReactComponent(named)) return named
+					const nestedNamed = namespaceOf(namespace.default)?.[name]
+					if (isReactComponent(nestedNamed)) return nestedNamed
+					if (
+						isReactComponent(namespace.default) &&
+						hasExportName(namespace.default, name)
+					)
+						return namespace.default
+					if (
+						isReactComponent(moduleExports) &&
+						hasExportName(moduleExports, name)
+					)
+						return moduleExports
+				}
 			}
+		} catch {
+			// Some client builds have proxies or unusual module namespaces.
+			// Try the next filter; authorization must not crash the settings UI.
 		}
-	} catch {
-		// Continue with the name-based lookup if this client has unusual exports.
-	}
-
-	try {
-		for (const [moduleExports] of lookupModules(withName(name), {
-			returnNamespace: true,
-			initialize: false,
-		})) {
-			const namespace = namespaceOf(moduleExports)
-			for (const candidate of [namespace?.[name], namespace?.default, namespace]) {
-				if (
-					isReactComponent(candidate) &&
-					hasExportName(candidate, name)
-				)
-					return candidate
-			}
-		}
-	} catch {
-		// The feature should fail with an actionable message, not break settings.
 	}
 	return undefined
 }
 
 /**
- * `openModal` is an ordinary function, not a React component. Resolve the
- * exact property first and preserve its receiver in case the export uses `this`.
+ * Discord's OAuth screen is opened through its modal stack, not through a
+ * generic openModal(render, options) helper. This matches the modal contract
+ * used by the original Decor and Gif Categories plugins.
  */
-function findModalOpener(): OpenModal | undefined {
-	const fallbackCandidates: OpenModal[] = []
-	const options = { returnNamespace: true, initialize: false } as const
-	const namespacesOf = (moduleExports: unknown): RecordLike[] => {
-		const namespace = namespaceOf(moduleExports)
-		const defaultNamespace = namespaceOf(namespace?.default)
-		return [namespace, defaultNamespace].filter(
-			(value): value is RecordLike => !!value,
-		)
-	}
-	const modalApi = (owner: RecordLike): boolean =>
-		typeof owner.closeModal === 'function' ||
-		typeof owner.openModalLazy === 'function'
+function findModalManager(): ModalManager | undefined {
+	const options = { returnNamespace: true } as const
+	let pushFallback: ModalManager['pushModal'] | undefined
+	let pushReceiver: RecordLike | undefined
+	let popFallback: ModalManager['popModal'] | undefined
+	let popReceiver: RecordLike | undefined
 
-	// Discord's modal manager exposes a close helper alongside openModal on
-	// common client builds. Prefer that shape over unrelated functions sharing
-	// the generic name `openModal`.
-	try {
-		for (const [moduleExports] of lookupModules(
-			withProps('openModal', 'closeModal'),
-			options,
-		)) {
-			for (const owner of namespacesOf(moduleExports)) {
-				if (typeof owner.openModal === 'function')
-					return (owner.openModal as OpenModal).bind(owner)
-			}
-		}
-	} catch {
-		// Continue with a broad search for client versions that split modal APIs.
-	}
-
-	try {
-		for (const [moduleExports] of lookupModules(withProps('openModal'), options)) {
-			for (const owner of namespacesOf(moduleExports)) {
-				if (typeof owner.openModal !== 'function') continue
-				const opener = (owner.openModal as OpenModal).bind(owner)
-				if (modalApi(owner)) return opener
-				fallbackCandidates.push(opener)
-			}
-		}
-	} catch {
-		// Try the named-function lookup next.
-	}
-
-	try {
-		for (const [moduleExports] of lookupModules(withName('openModal'), options)) {
-			for (const owner of namespacesOf(moduleExports)) {
-				const candidate = owner.openModal ?? owner.default
-				if (
-					typeof candidate === 'function' &&
-					hasExportName(candidate, 'openModal')
-				) {
-					fallbackCandidates.push(
-						owner.openModal === candidate
-							? (candidate as OpenModal).bind(owner)
-							: (candidate as OpenModal),
-					)
+	for (const filter of [
+		withProps('pushModal', 'popModal'),
+		withProps('pushModal'),
+	]) {
+		try {
+			for (const [moduleExports] of lookupModules(filter, options)) {
+				for (const owner of namespacesOf(moduleExports)) {
+					if (typeof owner.pushModal === 'function' && !pushFallback) {
+						pushFallback = owner.pushModal as ModalManager['pushModal']
+						pushReceiver = owner
+					}
+					if (typeof owner.popModal === 'function' && !popFallback) {
+						popFallback = owner.popModal as ModalManager['popModal']
+						popReceiver = owner
+					}
+					if (
+						typeof owner.pushModal === 'function' &&
+						typeof owner.popModal === 'function'
+					) {
+						return {
+							pushModal: (owner.pushModal as ModalManager['pushModal']).bind(
+								owner,
+							),
+							popModal: (owner.popModal as ModalManager['popModal']).bind(
+								owner,
+							),
+						}
+					}
 				}
 			}
+		} catch {
+			// Continue through the alternate modal-manager export shape.
 		}
-	} catch {
-		// Leave the caller to report that this Discord build has no modal API.
 	}
-	return fallbackCandidates[0]
+
+	if (!pushFallback || !popFallback) return undefined
+	return {
+		pushModal: pushFallback.bind(pushReceiver),
+		popModal: popFallback.bind(popReceiver),
+	}
 }
 
 /**
- * Discord does not expose its OAuth modal through Revenge's public API. Use
- * Discord's `openModal(render, options)` interface, discovered without relying
- * on a single first-match module result.
+ * Resolve Discord's native OAuth screen by its imported path first. This is
+ * more stable on Revenge Next than relying only on a minified module's name.
+ * The imported-path lookup is an internal Discord finder also used by the
+ * current ReviewDB Revenge Next port; keep it guarded for client-version drift.
  */
+function findOAuthAuthorizeModal(): unknown {
+	try {
+		const imported = lookupModuleWithImportedPath(
+			'modules/oauth2/native/OAuth2AuthorizeModal.tsx',
+		)?.[0]
+		const candidate = namespaceOf(imported)?.default ?? imported
+		if (isReactComponent(candidate)) return candidate
+	} catch {
+		// The path tracker may not be available on every Discord build.
+	}
+	return findComponentExport('OAuth2AuthorizeModal')
+}
+
+/**
+ * Discord's own authenticated HTTP client can complete the same authorize
+ * request as the modal UI. The response contains a callback `location`; do
+ * not open it in a browser because Decor consumes the one-time code on GET.
+ */
+function findDiscordHttpClient(): RecordLike | undefined {
+	try {
+		const matched = lookupModule(withProps('HTTP', 'getAPIBaseURL'))?.[0]
+		const namespace = namespaceOf(matched)
+		const client = namespace?.HTTP ?? namespaceOf(namespace?.default)?.HTTP
+		if (client && typeof client.post === 'function') return client
+	} catch {
+		// The direct fallback is optional; a missing helper should be explained.
+	}
+	return undefined
+}
+
+function authorizeDirect(expectedAccountId: string): Promise<void> {
+	const HTTP = findDiscordHttpClient()
+	if (typeof HTTP?.post !== 'function')
+		return Promise.reject(
+			new Error(
+				"Discord's OAuth modal is unavailable, and its authenticated HTTP helper could not be found in this build.",
+			),
+		)
+
+	return new Promise<void>((resolve, reject) => {
+		const key = `decor-next-oauth-${Date.now()}`
+		let settled = false
+		const finish = (error?: Error) => {
+			if (settled) return
+			settled = true
+			if (error) reject(error)
+			else resolve()
+		}
+		const dismiss = () => {
+			try {
+				AlertActionCreators.dismissAlert(key)
+			} catch {
+				// The alert may already be gone during navigation.
+			}
+		}
+		const cancel = () => {
+			dismiss()
+			finish(new Error('Authorization was cancelled.'))
+		}
+		const approve = async () => {
+			dismiss()
+			try {
+				if (getAuthSnapshot().accountId !== expectedAccountId)
+					throw new Error(
+						'The active Discord account changed. Reopen Decor and try again.',
+					)
+
+				const response = await HTTP.post({
+					url: '/oauth2/authorize',
+					query: {
+						client_id: CLIENT_ID,
+						response_type: 'code',
+						redirect_uri: AUTHORIZE_URL,
+						scope: 'identify',
+					},
+					body: { authorize: true, permissions: '0' },
+				})
+				const location = response?.body?.location
+				if (typeof location !== 'string') {
+					const message = response?.body?.message
+					const status = response?.status
+					throw new Error(
+						typeof message === 'string'
+							? message
+							: `Discord refused Decor authorization${status ? ` (HTTP ${status})` : ''}.`,
+					)
+				}
+
+				// Exchange the redirect location before any browser can consume the
+				// one-time code. Decor expects client=revenge and a plain-text token.
+				await exchangeDecorCallback(location, expectedAccountId)
+				finish()
+			} catch (error) {
+				finish(
+					error instanceof Error
+						? error
+						: new Error('Decor authorization failed.'),
+				)
+			}
+		}
+
+		AlertActionCreators.openAlert(
+			key,
+			<Design.AlertModal
+				title="Authorize Decor?"
+				content="Decor requests the identify scope, which shares your basic Discord identity. If you continue, Discord will authorize Decor and the plugin will exchange the callback directly without opening it in a browser."
+				actions={
+					<>
+						<Design.AlertActionButton
+							text="Cancel"
+							variant="tertiary"
+							onPress={cancel}
+						/>
+						<Design.AlertActionButton
+							text="Authorize"
+							variant="primary"
+							onPress={() => void approve()}
+						/>
+					</>
+				}
+			/>,
+		)
+	})
+}
+
+/**
+ * Exchange the callback URL inside the OAuth modal callback. The modal
+ * intercepts Discord's redirect before it navigates to the mirror endpoint;
+ * do not open that callback URL in an external browser, because the server
+ * consumes the temporary Discord code on the first request.
+ */
+/**
+ * Read an OAuth query parameter without URLSearchParams. React Native's URL
+ * implementation on some Discord builds exposes URLSearchParams methods that
+ * throw at runtime (ReviewDB documents the same limitation).
+ */
+function callbackQueryParam(location: string, key: string): string | null {
+	const queryStart = location.indexOf('?')
+	if (queryStart < 0) return null
+	const hashStart = location.indexOf('#', queryStart + 1)
+	const query = location.slice(
+		queryStart + 1,
+		hashStart < 0 ? undefined : hashStart,
+	)
+
+	for (const part of query.split('&')) {
+		if (!part) continue
+		const separator = part.indexOf('=')
+		const rawKey = separator < 0 ? part : part.slice(0, separator)
+		const rawValue = separator < 0 ? '' : part.slice(separator + 1)
+		try {
+			const decodedKey = decodeURIComponent(rawKey.replace(/\+/g, ' '))
+			if (decodedKey !== key) continue
+			return decodeURIComponent(rawValue.replace(/\+/g, ' '))
+		} catch {
+			// Ignore malformed parameters; the required `code` check below
+			// returns a useful error without logging or exposing the code.
+		}
+	}
+	return null
+}
+
+function withQueryParams(
+	base: string,
+	params: Record<string, string>,
+): string {
+	const separator = base.includes('?') ? '&' : '?'
+	const query = Object.entries(params)
+		.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+		.join('&')
+	return `${base}${separator}${query}`
+}
+
+/**
+ * Exchange the code from Discord's callback through the configured mirror.
+ * The callback location is only parsed for `code`/`error`; it is never fetched
+ * directly. This avoids consuming a one-time code through an unexpected URL,
+ * and uses string query handling to work around incomplete React Native
+ * URLSearchParams implementations.
+ */
+async function exchangeDecorCallback(
+	location: string,
+	expectedAccountId: string,
+	signal?: AbortSignal,
+): Promise<void> {
+	if (getAuthSnapshot().accountId !== expectedAccountId)
+		throw new Error(
+			'The active Discord account changed. Reopen Decor and try again.',
+		)
+	if (typeof location !== 'string' || !location.trim())
+		throw new Error('Discord returned an invalid Decor authorization callback.')
+
+	const callbackLocation = location.trim()
+	const oauthError = callbackQueryParam(callbackLocation, 'error')
+	if (oauthError === 'access_denied')
+		throw new Error('Discord authorization was denied.')
+	if (oauthError) {
+		const description = callbackQueryParam(callbackLocation, 'error_description')
+		throw new Error(
+			description
+				? `Discord authorization failed: ${description}`
+				: 'Discord reported an authorization error. Please retry.',
+		)
+	}
+	const code = callbackQueryParam(callbackLocation, 'code')
+	if (!code)
+		throw new Error(
+			'Discord returned a callback without an authorization code. Please retry.',
+		)
+
+	// The mirror documents GET /api/authorize?code=... as its exchange route.
+	// Always send the extracted code to the configured endpoint rather than
+	// following the origin/path in the callback's `location` value.
+	const exchangeUrl = withQueryParams(AUTHORIZE_URL, {
+		code,
+		client: 'revenge',
+	})
+	const controller = new AbortController()
+	const abortFromParent = () => controller.abort()
+	if (signal?.aborted) controller.abort()
+	else signal?.addEventListener('abort', abortFromParent, { once: true })
+	const timeout = setTimeout(() => controller.abort(), 20_000)
+	try {
+		let response: Response
+		try {
+			response = await fetch(exchangeUrl, {
+				method: 'GET',
+				headers: { Accept: 'text/plain, text/*;q=0.9' },
+				cache: 'no-store',
+				signal: controller.signal,
+			})
+		} catch {
+			if (controller.signal.aborted)
+				throw new Error(
+					'Decor authorization timed out. Check your connection and retry.',
+				)
+			throw new Error(
+				'Could not reach the Decor authorization endpoint. Check your mirror and connection.',
+			)
+		}
+		if (!response.ok)
+			throw new Error(`Decor authorization failed (HTTP ${response.status}).`)
+		const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+		if (contentType.includes('text/html'))
+			throw new Error(
+				'Decor returned a web page instead of an authorization token. Check the mirror endpoint.',
+			)
+		let responseText: string
+		try {
+			responseText = await response.text()
+		} catch {
+			if (controller.signal.aborted)
+				throw new Error(
+					'Decor authorization timed out. Check your connection and retry.',
+				)
+			throw new Error('Decor returned an unreadable authorization response.')
+		}
+		const token = responseText.trim()
+		if (
+			!token ||
+			token.length > 4096 ||
+			/^<!doctype\s+html|^<html\b/i.test(token)
+		)
+			throw new Error('Decor returned an invalid authorization response.')
+		if (getAuthSnapshot().accountId !== expectedAccountId)
+			throw new Error(
+				'The active Discord account changed. Reopen Decor and try again.',
+			)
+		setTokenForCurrentAccount(token, expectedAccountId)
+	} finally {
+		clearTimeout(timeout)
+		signal?.removeEventListener('abort', abortFromParent)
+	}
+}
+
 export async function authorizeWithDecor(
 	expectedAccountId: string,
 ): Promise<void> {
-	const OAuth2AuthorizeModal: any = findComponentExport('OAuth2AuthorizeModal')
-	const openModal = findModalOpener()
-	const WebView: any =
-		(ReactNative as any).WebView ??
-		findComponentExport('WebView') ??
-		findComponentExport('RNCWebView') ??
-		findComponentExport('DiscordWebView')
-	const hasOAuthModal = isReactComponent(OAuth2AuthorizeModal)
-	const hasWebView = isReactComponent(WebView)
-	if (!hasOAuthModal && !hasWebView)
-		throw new ManualOAuthRequiredError()
-	if (typeof openModal !== 'function')
-		throw new ManualOAuthRequiredError()
+	const OAuth2AuthorizeModal = findOAuthAuthorizeModal()
+	const modalManager = isReactComponent(OAuth2AuthorizeModal)
+		? findModalManager()
+		: undefined
 
+	// ReviewDB uses this same direct Discord request on builds where the lazy
+	// OAuth modal has not been initialized. The response location is exchanged
+	// in-process, never opened in a browser or manually pasted by the user.
+	if (!isReactComponent(OAuth2AuthorizeModal) || !modalManager)
+		return authorizeDirect(expectedAccountId)
 	if (getAuthSnapshot().accountId !== expectedAccountId)
 		throw new Error(
 			'The active Discord account changed. Reopen Decor and try again.',
@@ -299,40 +451,38 @@ export async function authorizeWithDecor(
 		let settled = false
 		let callbackStarted = false
 		let callbackController: AbortController | undefined
-		let dismissModal: (() => void) | undefined
+
+		const pop = () => {
+			try {
+				modalManager.popModal(OAUTH_MODAL_KEY)
+			} catch {
+				// Discord may already have removed this modal.
+			}
+		}
 		const finish = (error?: Error, close = false) => {
 			if (settled) return
 			settled = true
 			cancelPending = undefined
 			if (error) callbackController?.abort()
-			if (error || close) {
-				try {
-					dismissModal?.()
-				} catch {
-					// Discord may already have dismissed the authorization modal.
-				}
-			}
+			if (close) pop()
 			if (error) reject(error)
 			else resolve()
 		}
-		cancelPending = () =>
+		const cancelled = () =>
 			finish(new Error('Authorization was cancelled.'), true)
+		cancelPending = cancelled
 
-		const completeCallback = async (
-			location: string,
-			closeAfterSuccess = false,
-		): Promise<void> => {
+		const callback = async ({ location }: OAuthLocation): Promise<void> => {
 			if (settled || callbackStarted) return
 			callbackStarted = true
+			callbackController = new AbortController()
 			try {
-				callbackController = new AbortController()
 				await exchangeDecorCallback(
 					location,
 					expectedAccountId,
 					callbackController.signal,
 				)
-				if (settled) return
-				finish(undefined, closeAfterSuccess)
+				finish(undefined, true)
 			} catch (error) {
 				finish(
 					error instanceof Error
@@ -343,124 +493,32 @@ export async function authorizeWithDecor(
 			}
 		}
 
-		const interceptCallback = (location: string): boolean => {
-			try {
-				const callback = new URL(location)
-				const expected = new URL(AUTHORIZE_URL)
-				if (
-					callback.protocol !== 'https:' ||
-					callback.origin !== expected.origin ||
-					callback.pathname !== expected.pathname ||
-					callbackStarted
-				)
-					return false
-				void completeCallback(location, true)
-				return true
-			} catch {
-				return false
-			}
-		}
-
-		const authorizationUrl = new URL('https://discord.com/oauth2/authorize')
-		authorizationUrl.searchParams.set('client_id', CLIENT_ID)
-		authorizationUrl.searchParams.set('redirect_uri', AUTHORIZE_URL)
-		authorizationUrl.searchParams.set('response_type', 'code')
-		authorizationUrl.searchParams.set('scope', 'identify')
-
 		try {
-			openModal(
-				modalProps => {
-					const close =
-						modalProps.dismissOAuthModal ??
-						modalProps.onClose ??
-						modalProps.closeModal
-					if (typeof close === 'function') dismissModal = close
-					if (!hasOAuthModal) {
-						const NativeView = (ReactNative as any).View
-						const NativeText = (ReactNative as any).Text
-						const NativePressable = (ReactNative as any).Pressable
-						return (
-							<NativeView style={{ flex: 1, minHeight: 480 }}>
-								<NativeView
-									style={{
-										minHeight: 52,
-										flexDirection: 'row',
-										alignItems: 'center',
-										justifyContent: 'space-between',
-										paddingHorizontal: 16,
-									}}
-								>
-									<NativeText>Authorize Decor</NativeText>
-									<NativePressable
-										accessibilityRole="button"
-										onPress={() =>
-											finish(new Error('Authorization was cancelled.'), true)
-										}
-										style={{ padding: 12 }}
-									>
-										<NativeText>Cancel</NativeText>
-									</NativePressable>
-								</NativeView>
-								<WebView
-									source={{ uri: authorizationUrl.toString() }}
-									style={{ flex: 1 }}
-									javaScriptEnabled
-									sharedCookiesEnabled
-									onShouldStartLoadWithRequest={(request: { url?: string }) => {
-										const location = request?.url ?? ''
-										if (interceptCallback(location)) return false
-										try {
-											const url = new URL(location)
-											return (
-												url.protocol === 'https:' &&
-												(url.hostname === 'discord.com' ||
-													url.hostname.endsWith('.discord.com') ||
-													url.hostname === 'discordapp.com' ||
-													url.hostname.endsWith('.discordapp.com') ||
-													url.hostname === 'hcaptcha.com' ||
-													url.hostname.endsWith('.hcaptcha.com'))
-											)
-										} catch {
-											return false
-										}
-									}}
-									onNavigationStateChange={(state: { url?: string }) => {
-										if (state?.url) interceptCallback(state.url)
-									}}
-									onError={() =>
-										finish(
-											new Error(
-												'Could not load Discord authorization. Check your connection and retry.',
-											),
-											true,
-										)
-									}
-								/>
-							</NativeView>
-						)
-					}
-					return (
-						<OAuth2AuthorizeModal
-							{...modalProps}
-							clientId={CLIENT_ID}
-							redirectUri={AUTHORIZE_URL}
-							scopes={['identify']}
-							responseType="code"
-							permissions={0n}
-							cancelCompletesFlow={false}
-							callback={async ({ location }: { location: string }) =>
-								completeCallback(location)
-							}
-						/>
-					)
+			// This is Discord's real modal-stack contract, also used by the
+			// original Decor plugin. OAuth2AuthorizeModal catches the redirect
+			// and passes its URL to `callback` before loading the endpoint.
+			modalManager.pushModal({
+				key: OAUTH_MODAL_KEY,
+				modal: {
+					key: OAUTH_MODAL_KEY,
+					modal: OAuth2AuthorizeModal,
+					animation: 'slide-up',
+					shouldPersistUnderModals: false,
+					props: {
+						clientId: CLIENT_ID,
+						redirectUri: AUTHORIZE_URL,
+						scopes: ['identify'],
+						responseType: 'code',
+						permissions: 0n,
+						cancelCompletesFlow: false,
+						callback,
+						dismissOAuthModal: cancelled,
+					},
+					closable: true,
 				},
-				{
-					onCloseCallback: () =>
-						finish(new Error('Authorization was cancelled.')),
-				},
-			)
+			})
 		} catch {
-			finish(new Error("Could not open Discord's OAuth authorization UI."))
+			finish(new Error("Could not open Discord's OAuth authorization modal."))
 		}
 	})
 }
