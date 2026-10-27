@@ -15,9 +15,9 @@ Plugin ID: `de.lisaexists.hidden-channels-next`
 
 A port of the Vendetta Decor plugin. 
 
-⚠️ **WIP/NOT TESTED!** The Decor server is currently down, so I was not able to test functionality.
+The Decor server is currently down
 
-Version: **1.0.6**	
+Version: **1.0.7**	
 Plugin ID `de.lisaexists.decor-next`
 
 ## Build and publishing
