@@ -129,7 +129,7 @@ const Text = ThemedText
 // documentation. Discord's developer docs currently list November 16, 2026 for
 // mandatory channel obfuscation for bots. Keep the uncertainty explicit.
 const SERVER_SIDE_CHANGE_WARNING =
-  'Discord will stop sending hidden channel names and metadata starting November 16, 2026. Once Discord stops sending real hidden-channel names or metadata to your client, this plugin cannot recover that missing data.'
+  '⚠️ **SUPPORT WILL NOT BE GIVEN** ⚠️ \nDiscord will stop sending hidden channel names and metadata starting November 16, 2026. Once Discord stops sending real hidden-channel names or metadata to your client, this plugin cannot recover that missing data.'
 const SERVER_SIDE_CHANGE_NOTIFICATION =
   'Hidden Channels warning: Discord server-side changes on November 16, 2026 will break this plugin. See the plugin settings for details.'
 
