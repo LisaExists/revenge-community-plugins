@@ -17,7 +17,7 @@ A port of the Vendetta Decor plugin.
 
 The Decor server is currently down
 
-Version: **1.0.7**	
+Version: **1.0.8**  
 Plugin ID `de.lisaexists.decor-next`
 
 ## Build and publishing
