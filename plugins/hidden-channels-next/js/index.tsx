@@ -1,5 +1,6 @@
 /**
  * Hidden Channels — Revenge Next port.
+ * Plugin version: 1.1.3
  *
  * Upstream project: https://github.com/lioncat6/revenge-plugins
  * The upstream repository credits cloudburst and Training Dummy.
@@ -287,7 +288,10 @@ function relativeDate(date: Date): string {
 
 function showToast(content: string): void {
   try {
-    ToastActionCreators.open({ key: TOAST_KEY, content })
+    // Use the current Mana toast API: open(key, { text }). The legacy object
+    // overload ({ key, content }) is deprecated and can leave toast state
+    // malformed on newer Discord builds.
+    ToastActionCreators.open(TOAST_KEY, { text: content })
   } catch (error) {
     console.warn('[Hidden Channels] Could not display toast:', error)
   }
@@ -360,34 +364,47 @@ export default plugin<{ jsonStorage: HiddenChannelsSettings }>({
   },
 
   start({ cleanup, jsonStorage, logger }) {
-    // Show the compatibility warning every time the plugin starts. The toast and
-    // modal are independently guarded so one failing API does not suppress the other.
-    try {
-      ToastActionCreators.open({
-        key: STARTUP_WARNING_TOAST_KEY,
-        content: SERVER_SIDE_CHANGE_NOTIFICATION,
-      })
-    } catch (error) {
-      logger.warn(`[Hidden Channels] Could not display the startup warning notification: ${String(error)}`)
-    }
-
-    // Only the allowlisted developer can change this preference through the UI.
-    // The toast above intentionally remains enabled even when the dialog is disabled.
-    const startupSettings = jsonStorage.cache as HiddenChannelsSettings | undefined
-    if (startupSettings?.showStartupWarningPopup ?? true) {
+    // JSON storage loading is asynchronous even when load: true is configured.
+    // Do not read the startup popup preference until the persisted file has loaded,
+    // otherwise an unset cache is mistaken for the default `true` on every launch.
+    void (async () => {
+      let startupSettings = jsonStorage.cache as HiddenChannelsSettings | undefined
       try {
-        AlertActionCreators.openAlert(
-          STARTUP_WARNING_ALERT_KEY,
-          <Design.AlertModal
-            title="Hidden Channels compatibility warning"
-            content={<Text>{SERVER_SIDE_CHANGE_WARNING}</Text>}
-            actions={<Design.AlertActionButton text="Understood" />}
-          />,
-        )
+        if (!jsonStorage.loaded || !startupSettings) {
+          startupSettings = await jsonStorage.get() as HiddenChannelsSettings
+        }
       } catch (error) {
-        logger.warn(`[Hidden Channels] Could not display the startup warning dialog: ${String(error)}`)
+        logger.warn(`[Hidden Channels] Could not load startup warning preferences: ${String(error)}`)
       }
-    }
+
+      // The toast remains enabled even when the developer disables the dialog.
+      try {
+        // Use the current two-argument API rather than the deprecated
+        // { key, content } overload, which can crash Discord's toast container.
+        ToastActionCreators.open(STARTUP_WARNING_TOAST_KEY, {
+          text: SERVER_SIDE_CHANGE_NOTIFICATION,
+          variant: 'critical',
+          duration: 10000,
+        })
+      } catch (error) {
+        logger.warn(`[Hidden Channels] Could not display the startup warning notification: ${String(error)}`)
+      }
+
+      if (startupSettings?.showStartupWarningPopup ?? true) {
+        try {
+          AlertActionCreators.openAlert(
+            STARTUP_WARNING_ALERT_KEY,
+            <Design.AlertModal
+              title="Hidden Channels compatibility warning"
+              content={<Text>{SERVER_SIDE_CHANGE_WARNING}</Text>}
+              actions={<Design.AlertActionButton text="Understood" />}
+            />,
+          )
+        } catch (error) {
+          logger.warn(`[Hidden Channels] Could not display the startup warning dialog: ${String(error)}`)
+        }
+      }
+    })()
 
     // Read settings dynamically: jsonStorage.set() updates its cache while the
     // plugin remains active, just as the Classic storage proxy did.
@@ -756,9 +773,19 @@ export default plugin<{ jsonStorage: HiddenChannelsSettings }>({
               label="Show Startup Warning Popup"
               subLabel="Disable the startup warning dialog on this device. The warning notification will still appear."
               value={settings?.showStartupWarningPopup ?? true}
-              onValueChange={(showStartupWarningPopup: boolean) =>
-                api.jsonStorage.set({ showStartupWarningPopup })
-              }
+              onValueChange={async (showStartupWarningPopup: boolean) => {
+                try {
+                  // Write a complete settings object so the preference is retained
+                  // even if a storage adapter uses replacement semantics.
+                  await api.jsonStorage.set({
+                    showIcon: settings?.showIcon ?? true,
+                    showPopup: settings?.showPopup ?? true,
+                    showStartupWarningPopup,
+                  })
+                } catch (error) {
+                  console.warn('[Hidden Channels] Could not save the startup warning preference:', error)
+                }
+              }}
             />
           </Design.TableRowGroup>
         ) : null}

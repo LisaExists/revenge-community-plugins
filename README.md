@@ -8,7 +8,7 @@ A personal plugin repository for Revenge Next, maintained by LisaExists.
 
 A Hidden Channels port for Revenge Next, featuring permission-aware detection, lock icons, and optional confirmation before opening hidden channels.
 
-Version: **1.1.2.1**  
+Version: **1.1.3**  
 Plugin ID: `de.lisaexists.hidden-channels-next`
 
 ### [Decor (Next)](plugins/decor-next)
@@ -17,7 +17,7 @@ A port of the Vendetta Decor plugin.
 
 ⚠️ **WIP/NOT TESTED!** The Decor server is currently down, so I was not able to test functionality.
 
-Version: **1.0.6**
+Version: **1.0.6**	
 Plugin ID `de.lisaexists.decor-next`
 
 ## Build and publishing
