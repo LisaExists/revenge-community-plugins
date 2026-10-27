@@ -40,7 +40,7 @@
         "Lioncat6 <917903273514663957>"
       ],
       "channels": {
-        "latest": "1.1.2"
+        "latest": "1.1.2.1"
       },
       "versions": {
         "1.1.0": {
@@ -60,6 +60,19 @@
           "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.hidden-channels-next@1.1.1.zip",
           "sha256": "7d967fcdbf8ce2f4f46e3296f3ebf7f6e80110dfc38e3bdb71c06e07d1270f58",
           "size": 4495,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=350.4"
+            }
+          }
+        },
+        "1.1.2.1": {
+          "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.hidden-channels-next@1.1.2.1.zip",
+          "sha256": "54e46b1aad125d59d115f6bd8bdbdc141338d50e664b31a806efdf58332cbf95",
+          "size": 5416,
           "dependencies": {
             "revenge.api": {
               "version": ">=1 <2"
