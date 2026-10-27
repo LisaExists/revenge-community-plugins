@@ -32,7 +32,7 @@
     },
     "de.lisaexists.hidden-channels-next": {
       "name": "Hidden Channels (Next)",
-      "description": "Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
+      "description": "[WILL STOP WORKING AFTER NOVEMBER 6TH DUE TO DISCORD PATCHING IT SERVER-SIDED] Hidden Channels port for Revenge Next, with lock icons, permission-aware detection, and optional confirmation before opening hidden channels.",
       "author": "LisaExists <836161010053283890>",
       "contributors": [
         "cloudburst <892128204150685769>",
@@ -40,7 +40,7 @@
         "Lioncat6 <917903273514663957>"
       ],
       "channels": {
-        "latest": "1.1.1"
+        "latest": "1.1.2"
       },
       "versions": {
         "1.1.0": {
@@ -60,6 +60,19 @@
           "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.hidden-channels-next@1.1.1.zip",
           "sha256": "7d967fcdbf8ce2f4f46e3296f3ebf7f6e80110dfc38e3bdb71c06e07d1270f58",
           "size": 4495,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=350.4"
+            }
+          }
+        },
+        "1.1.2": {
+          "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.hidden-channels-next@1.1.2.zip",
+          "sha256": "b81cf0e0f01238a41d3042a68623834233efd66c0f9474d39c3da80fb5662be6",
+          "size": 5358,
           "dependencies": {
             "revenge.api": {
               "version": ">=1 <2"
