@@ -12,7 +12,7 @@
         "Bwlok <501827585806827520>"
       ],
       "channels": {
-        "latest": "1.0.7"
+        "latest": "1.0.8"
       },
       "versions": {
         "1.0.6": {
@@ -31,6 +31,19 @@
         "1.0.7": {
           "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.decor-next@1.0.7.zip",
           "sha256": "b552e86b0b37b3bcdc836cc9d8eca2d00f1acbd54874d5c7a71172d3d5c783d6",
+          "size": 12384,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.0"
+            }
+          }
+        },
+        "1.0.8": {
+          "url": "https://lisaexists.github.io/revenge-community-plugins/pool/de.lisaexists.decor-next@1.0.8.zip",
+          "sha256": "28e593bb26f87f2d4547798889ce02210818746e6e0d9d6ebb9ab7b3c737ed87",
           "size": 12384,
           "dependencies": {
             "revenge.api": {
